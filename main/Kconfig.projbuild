@@ -1,0 +1,19 @@
+menu "LED Strip Configuration"
+    config GPIO_STRIP_DATA_PIN
+        int "gpio pin number used for data transmission"
+        default 12
+        help
+            Set the GPIO number used for transmitting the RMT signal.
+
+    config STRIP_TOTAL_NUM_LEDS
+        int "Number of LEDS in this strip"
+        default 12
+        help
+            A single RGB strip contains several LEDs.
+
+    config MINIMUM_BRIGHTNESS_ON_TURN_ON
+        int "Minimum strip brightness on turn on"
+        default 20
+        help
+            The minimum starting brightness of the strip if it is turned on.
+endmenu
