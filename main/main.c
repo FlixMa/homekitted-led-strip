@@ -70,7 +70,7 @@ void on_wifi_ready() {
     strip_init();
     init_homekit();
 
-    //TODO:reactivate rotary encoder xTaskCreatePinnedToCore(encoder_evaluation_task, "Encoder Eval", 2048, NULL, 5, NULL, 1);
+    //TODO reactivate rotary encoder: xTaskCreatePinnedToCore(encoder_evaluation_task, "Encoder Eval", 2048, NULL, 5, NULL, 1);
 }
 
 void app_main() {

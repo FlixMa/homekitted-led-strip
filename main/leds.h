@@ -10,9 +10,13 @@ float strip_saturation;      // saturation is scaled 0 to 100
 float strip_brightness;     // brightness is scaled 0 to 100
 bool is_strip_on;
 
-void led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, uint32_t *b);
+void led_strip_hsv2rgb(uint16_t h, uint16_t s, uint16_t v, uint16_t *r, uint16_t *g, uint16_t *b);
 void strip_init(void);
 void strip_update(void);
 void strip_identify(void);
+void strip_animation(void);
+
+void shuffle(uint16_t *input, uint16_t *output, size_t n);
+
 
 #endif // _LEDS_H_

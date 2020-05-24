@@ -9,19 +9,20 @@
 #define RMT_TX_CHANNEL RMT_CHANNEL_0
 static const char *TAG = "example";
 
+SemaphoreHandle_t strip_semaphore = NULL;
 led_strip_t *strip = 0;
+uint16_t random_led_indices[CONFIG_STRIP_TOTAL_NUM_LEDS];
 
-void led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t *g, uint32_t *b)
-{
+void led_strip_hsv2rgb(uint16_t h, uint16_t s, uint16_t v, uint16_t *r, uint16_t *g, uint16_t *b) {
     h %= 360; // h -> [0,360]
-    uint32_t rgb_max = v * 2.55f;
-    uint32_t rgb_min = rgb_max * (100 - s) / 100.0f;
+    uint16_t rgb_max = v * 2.55f;
+    uint16_t rgb_min = rgb_max * (100 - s) / 100.0f;
 
-    uint32_t i = h / 60;
-    uint32_t diff = h % 60;
+    uint16_t i = h / 60;
+    uint16_t diff = h % 60;
 
     // RGB adjustment amount by hue
-    uint32_t rgb_adj = (rgb_max - rgb_min) * diff / 60;
+    uint16_t rgb_adj = (rgb_max - rgb_min) * diff / 60;
 
     switch (i) {
     case 0:
@@ -59,6 +60,8 @@ void led_strip_hsv2rgb(uint32_t h, uint32_t s, uint32_t v, uint32_t *r, uint32_t
 
 void strip_init(void) {
 
+    vSemaphoreCreateBinary( strip_semaphore );
+
     rmt_config_t config = {                           \
         .rmt_mode = RMT_MODE_TX,                      \
         .channel = RMT_TX_CHANNEL,                    \
@@ -88,25 +91,51 @@ void strip_init(void) {
     }
     // Clear LED strip (turn off all LEDs)
     ESP_ERROR_CHECK(strip->clear(strip, 100));
+
+
+    // initialize default array (helps with random later on)
+    for (uint16_t i = 0; i < CONFIG_STRIP_TOTAL_NUM_LEDS; ++i) {
+        random_led_indices[i] = i;
+    }
 }
 
-void strip_update(void) {
-    uint32_t red = 0;
-    uint32_t green = 0;
-    uint32_t blue = 0;
+void strip_update_task(void * pvParameters) {
+    xSemaphoreTake(strip_semaphore, portMAX_DELAY);
+    uint16_t red = 0;
+    uint16_t green = 0;
+    uint16_t blue = 0;
     led_strip_hsv2rgb(strip_hue, strip_saturation, is_strip_on ? strip_brightness : 0, &red, &green, &blue);
 
     for (int i = 0; i < CONFIG_STRIP_TOTAL_NUM_LEDS; ++i) {
         ESP_ERROR_CHECK(strip->set_pixel(strip, i, red, green, blue));
     }
     ESP_ERROR_CHECK(strip->refresh(strip, 100));
+
+    /*shuffle(random_led_indices, random_led_indices, CONFIG_STRIP_TOTAL_NUM_LEDS);
+    for (int i = 0; i < CONFIG_STRIP_TOTAL_NUM_LEDS; ++i) {
+        ESP_ERROR_CHECK(strip->set_pixel(strip, random_led_indices[i], red, green, blue));
+        vTaskDelay((CONFIG_STRIP_TOTAL_NUM_LEDS - i) / portTICK_PERIOD_MS / 100);
+        ESP_ERROR_CHECK(strip->refresh(strip, 100));
+    }*/
+
+    xSemaphoreGive(strip_semaphore);
+
+    // delete current task as were done now
+    vTaskDelete(NULL);
 }
 
-void strip_identify(void) {
+void strip_update(void) {
+    xTaskCreate(strip_update_task, "STRIP_UPDATE", 2048, NULL, 5, NULL);
+}
 
-    uint32_t red = 0;
-    uint32_t green = 0;
-    uint32_t blue = 0;
+
+void strip_identify_task(void * pvParameters) {
+
+    xSemaphoreTake(strip_semaphore, portMAX_DELAY);
+
+    uint16_t red = 0;
+    uint16_t green = 0;
+    uint16_t blue = 0;
     uint16_t hue = 0;
 
     // Show simple rainbow chasing pattern
@@ -127,6 +156,23 @@ void strip_identify(void) {
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
+    xSemaphoreGive(strip_semaphore);
+    strip_update_task(pvParameters);
+}
 
-    strip_update();
+void strip_identify(void) {
+    xTaskCreate(strip_identify_task, "STRIP_IDENTIFY", 2048, NULL, 5, NULL);
+}
+
+#include <stdlib.h>
+
+void shuffle(uint16_t *input, uint16_t *output, size_t n) {
+    if (n < 2) return;
+
+    for (size_t i = 0; i < n; ++i) {
+        size_t j = rand() % n;
+        uint16_t t = input[j];
+        output[j] = input[i];
+        output[i] = t;
+    }
 }
