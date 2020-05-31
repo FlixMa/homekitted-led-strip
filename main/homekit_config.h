@@ -20,4 +20,9 @@ void set_strip_saturation(homekit_value_t value);
 homekit_value_t get_strip_brightness();
 void set_strip_brightness(homekit_value_t value);
 
+// ANIMATION
+
+homekit_value_t is_strip_animation_turned_on();
+void set_strip_animation_on(homekit_value_t value);
+
 #endif

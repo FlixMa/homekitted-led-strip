@@ -1,17 +1,26 @@
 #include <sdkconfig.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/timers.h>
 #include <esp_log.h>
 #include <driver/rmt.h>
 
 #include "leds.h"
+#include "animation_sequence.h"
 
 #define RMT_TX_CHANNEL RMT_CHANNEL_0
-static const char *TAG = "example";
+#define SPARKLE_LENGTH (20)
+#define max(x, y) ((x > y) ? x : y)
+#define min(x, y) ((x < y) ? x : y)
+#define constrain(x, l, u) (min(max(l, x), u))
 
+static const char *TAG = "LEDS";
+
+TimerHandle_t timer_on_idle_time_expired = NULL;
 SemaphoreHandle_t strip_semaphore = NULL;
 led_strip_t *strip = 0;
 uint16_t random_led_indices[CONFIG_STRIP_TOTAL_NUM_LEDS];
+
 
 void led_strip_hsv2rgb(uint16_t h, uint16_t s, uint16_t v, uint16_t *r, uint16_t *g, uint16_t *b) {
     h %= 360; // h -> [0,360]
@@ -100,34 +109,65 @@ void strip_init(void) {
 }
 
 void strip_update_task(void * pvParameters) {
+    ESP_LOGV(TAG, "Taking Semaphore");
     xSemaphoreTake(strip_semaphore, portMAX_DELAY);
+    ESP_LOGI(TAG, "Updating Strip");
     uint16_t red = 0;
     uint16_t green = 0;
     uint16_t blue = 0;
     led_strip_hsv2rgb(strip_hue, strip_saturation, is_strip_on ? strip_brightness : 0, &red, &green, &blue);
-
+    /*
     for (int i = 0; i < CONFIG_STRIP_TOTAL_NUM_LEDS; ++i) {
         ESP_ERROR_CHECK(strip->set_pixel(strip, i, red, green, blue));
     }
     ESP_ERROR_CHECK(strip->refresh(strip, 100));
-
-    /*shuffle(random_led_indices, random_led_indices, CONFIG_STRIP_TOTAL_NUM_LEDS);
+    */
+    shuffle(random_led_indices, random_led_indices, CONFIG_STRIP_TOTAL_NUM_LEDS);
     for (int i = 0; i < CONFIG_STRIP_TOTAL_NUM_LEDS; ++i) {
         ESP_ERROR_CHECK(strip->set_pixel(strip, random_led_indices[i], red, green, blue));
-        vTaskDelay((CONFIG_STRIP_TOTAL_NUM_LEDS - i) / portTICK_PERIOD_MS / 100);
-        ESP_ERROR_CHECK(strip->refresh(strip, 100));
-    }*/
-
+        ESP_ERROR_CHECK(strip->refresh(strip, portMAX_DELAY));
+        vTaskDelay(((CONFIG_STRIP_TOTAL_NUM_LEDS - i) / 10) / portTICK_PERIOD_MS);
+    }
+    ESP_LOGV(TAG, "Giving Semaphore");
     xSemaphoreGive(strip_semaphore);
 
     // delete current task as were done now
+    ESP_LOGV(TAG, "Deleting task");
     vTaskDelete(NULL);
 }
 
 void strip_update(void) {
-    xTaskCreate(strip_update_task, "STRIP_UPDATE", 2048, NULL, 5, NULL);
+    ESP_LOGD(TAG, "strip_update request received.");
+    if (xTaskCreate(strip_update_task, "STRIP_UPDATE", 2048, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "strip_update_task couldnt be created.");
+    }
 }
 
+void on_idle_time_expired(TimerHandle_t timer) {
+    strip_update();
+}
+
+void strip_update_on_idle(void) {
+    ESP_LOGD(TAG, "strip_update_on_idle request received.");
+    if (timer_on_idle_time_expired == NULL) {
+        timer_on_idle_time_expired = xTimerCreate(
+            "timer_on_idle_time_expired",   // Just a text name, not used by the kernel.
+            CONFIG_MAX_BULK_UPDATE_TIME_MS / portTICK_PERIOD_MS,      // The timer period in ticks.
+            pdFALSE,                        // The timer wont auto-reload themselves when they expire.
+            NULL,
+            on_idle_time_expired
+        );
+
+        if (timer_on_idle_time_expired == NULL) {
+            ESP_LOGE(TAG, "timer couldnt be created.");
+            for(;;);
+        }
+    }
+    if (xTimerReset(timer_on_idle_time_expired, 100 / portTICK_PERIOD_MS) != pdPASS) {
+        ESP_LOGE(TAG, "timer couldnt be reset.");
+        for(;;);
+    }
+}
 
 void strip_identify_task(void * pvParameters) {
 
@@ -162,6 +202,61 @@ void strip_identify_task(void * pvParameters) {
 
 void strip_identify(void) {
     xTaskCreate(strip_identify_task, "STRIP_IDENTIFY", 2048, NULL, 5, NULL);
+}
+
+TaskHandle_t strip_animation_task_handle = NULL;
+int16_t strip_animation_saturation_values[CONFIG_STRIP_TOTAL_NUM_LEDS];
+void strip_animation_task(void * pvParameters) {
+    uint16_t red = 0;
+    uint16_t green = 0;
+    uint16_t blue = 0;
+
+    while (is_strip_animation_on) {
+        /*for (uint16_t frame_idx = 0; frame_idx < ANIMATION_SEQUENCE_NUM_FRAMES && is_strip_animation_on; ++frame_idx) {
+            for (uint16_t led_idx = 0; led_idx < ANIMATION_SEQUENCE_NUM_PIXEL_PER_FRAME && led_idx < CONFIG_STRIP_TOTAL_NUM_LEDS && is_strip_animation_on; ++led_idx) {
+                uint8_t *rgb = animation_sequence[frame_idx][led_idx];
+                ESP_ERROR_CHECK(strip->set_pixel(strip, led_idx, rgb[2], rgb[1], rgb[0]));
+            }
+            ESP_ERROR_CHECK(strip->refresh(strip, portMAX_DELAY));
+            vTaskDelay((1000/30) / portTICK_PERIOD_MS);
+        }*/
+
+
+        for (uint16_t random_led_idx = 0; random_led_idx < CONFIG_STRIP_TOTAL_NUM_LEDS && is_strip_animation_on; ++random_led_idx) {
+
+            // reduce saturation on the selected leds
+            uint16_t random_led_offset = random_led_indices[random_led_idx];
+            for (uint16_t random_led = 0; random_led < SPARKLE_LENGTH && is_strip_animation_on; ++random_led) {
+                uint16_t led_idx = (random_led_offset + random_led) % CONFIG_STRIP_TOTAL_NUM_LEDS;
+                strip_animation_saturation_values[led_idx] -= 25 + rand() % 25;
+            }
+
+            // walk through all leds and apply the new color / saturation
+            // also fade out saturation back to normal on every iteration
+            for (uint16_t led_idx = 0; led_idx < CONFIG_STRIP_TOTAL_NUM_LEDS && is_strip_animation_on; ++led_idx) {
+                strip_animation_saturation_values[led_idx] = constrain(strip_animation_saturation_values[led_idx] + 7, 0, strip_saturation);
+                led_strip_hsv2rgb(
+                    strip_hue,
+                    strip_animation_saturation_values[led_idx],
+                    is_strip_on ? strip_brightness : 0,
+                    &red, &green, &blue
+                );
+                ESP_ERROR_CHECK(strip->set_pixel(strip, led_idx, red, green, blue));
+            }
+
+            // update the strip and wait split second (dont go to fast -> flickering)
+            ESP_ERROR_CHECK(strip->refresh(strip, portMAX_DELAY));
+            vTaskDelay((1000/30) / portTICK_PERIOD_MS);
+        }
+    }
+    strip_animation_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+void strip_update_animation(void) {
+    if (is_strip_animation_on && strip_animation_task_handle == NULL) {
+        xTaskCreate(strip_animation_task, "STRIP_ANIMATION", 2048, NULL, 5, &strip_animation_task_handle);
+    }
 }
 
 #include <stdlib.h>

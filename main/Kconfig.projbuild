@@ -16,4 +16,12 @@ menu "LED Strip Configuration"
         default 20
         help
             The minimum starting brightness of the strip if it is turned on.
+
+    config MAX_BULK_UPDATE_TIME_MS
+        int "Maximum time a for bulk updates [ms]"
+        default 20
+        help
+            The maximum time between two characteristics updates which should be treated as one (in milliseconds).
+
+
 endmenu
